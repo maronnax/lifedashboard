@@ -1,6 +1,7 @@
 from lifedashboard.redisvariable import ActiveProject
 from lifedashboard.redisvariable import ActivePomodoro
 from lifedashboard.redisvariable import BreakStatus
+import lifedashboard.model as model
 import lifedashboard.tasks
 import datetime
 

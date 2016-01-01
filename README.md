@@ -16,3 +16,14 @@ daily emotional tracking, plotting of personal state, etc.
 3. Commit your changes (`git commit -am 'Add some feature'`)
 4. Push to the branch (`git push origin my-new-feature`)
 5. [Create new Pull Request](https://help.github.com/articles/creating-a-pull-request)
+
+## External Dependencies
+
+For this highly personal alpha version, I am making no serious attempt
+to avoid weird dependencies.  These must be installed externally.
+
+- celery plist starter
+- redis
+
+
+## Running the code

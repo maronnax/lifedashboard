@@ -1,0 +1,5 @@
+#!/usr/bin/env python
+
+import lifedashboard.secretary.variable.active as active
+active.ActivePomodoro.clearState()
+active.ActiveProject.clearState()

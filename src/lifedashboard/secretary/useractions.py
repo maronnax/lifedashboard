@@ -1,29 +1,16 @@
-from lifedashboard.redisvariable import ActiveProject
-from lifedashboard.redisvariable import ActivePomodoro
-from lifedashboard.redisvariable import BreakStatus
-import lifedashboard.model as model
-import lifedashboard.tasks
+from lifedashboard.secretary.variable.active import ActiveProject
+from lifedashboard.secretary.variable.active import ActivePomodoro
+from lifedashboard.secretary.variable.breakstatus import BreakStatus
+import lifedashboard.tasks as tasks
+
+from lifedashboard.status import WorkStatus
 import datetime
+import lifedashboard.model as model
 
-def setActiveProject(session):
-    if ActiveProject.projectIsActive():
-        lines = ["You are currently working on {}.".format(ActiveProject.getCurrentActivityName())]
+def setActiveProjectUserAction(secretary):
+    assert secretary.work_status.user_work_status == WorkStatus.WAITING_FOR_WORK_ACTION, "Cannot set active project unless existing ap's, pomodoros, and breaks are closed"
 
-        if ActivePomodoro.pomodoroIsActive():
-            lines.append("There is {0} left to go in the current pomodoro.")
-
-        print(" ".join(lines))
-        if not input("Do you want to switch? ").lower().strip().startswith("y"):
-            print("Ok.")
-            return
-        else:
-            if ActivePomodoro.pomodoroIsActive():
-                print("Ending pomodoro")
-                ActivePomodoro.endActivePomodoro()
-
-            ActiveProject.endActiveProject()
-
-    focusgroups = session.query(model.FocusGroup).all()
+    focusgroups = secretary.session.query(model.FocusGroup).all()
     print("What would you like to work on?")
     for (ndx, focus) in enumerate(focusgroups):
         print("{}: {}".format(ndx+1,focus))
@@ -38,15 +25,18 @@ def setActiveProject(session):
     activity = group_activities[ndx]
 
     ActiveProject.startActiveProject(activity)
-
+    secretary.work_status.user_work_status = WorkStatus.WAITING_FOR_POMODORO_ACTION
     return
 
-def endActiveProject(session):
+def endActiveProjectUserAction(secretary):
     print("Ending project")
     ActiveProject.endActiveProject()
+
+    secretary.work_status.user_work_status = WorkStatus.WAITING_FOR_WORK_ACTION
     return
 
-def startActivePomodoro(session):
+def startActivePomodoroUserAction(secretary):
+    session = secretary.session
     key = "i am ready to work"
     #key = ""
     print("key: {}".format(key))
@@ -71,22 +61,22 @@ def startActivePomodoro(session):
             ""]
 
     args[2] = "Starting Pom. 25m left."
-    lifedashboard.tasks.say.delay(*args)
+    tasks.say.delay(*args)
 
     args[2] = "2 minute drill.  Finish up."
-    lifedashboard.tasks.say.apply_async(args=args, countdown = 23 * 60)
+    tasks.say.apply_async(args=args, countdown = 23 * 60)
 
     args[2] = "Pencils Down."
-    lifedashboard.tasks.interrupt.apply_async(args=args, countdown = 25 * 60)
-
+    tasks.interrupt.apply_async(args=args, countdown = 25 * 60)
+    secretary.work_status.user_work_status = WorkStatus.POMODORO
     return
 
-def endActivePomodoro(session):
+def endActivePomodoroUserAction(secretary):
     ActivePomodoro.endActivePomodoro()
+    secretary.work_status.user_work_status = WorkStatus.WAITING_FOR_BREAK
     return
 
-
-def showStatus(session):
+def showStatusUserAction(secretary):
     if ActiveProject.projectIsActive():
         print("You are working on {}".format(ActiveProject.getCurrentActivityName()))
     else:
@@ -102,33 +92,8 @@ def showStatus(session):
         print("No pomodoros are running currently.")
     return
 
-def showHelp(session):
-    print("I know the following commands.")
-    print("------------------------------------------")
-    print("s             # Show current status")
-    # print("ss            # Show daily status")
-    #print("start day     # create your daily schedule.")
-    print("start ap      # start active project")
-    print("end ap        # End active project")
-    print("start pom     # Start pomodoro")
-    print("end pom       # End pomodoro")
-    print("break         # Take a break.")
-    print("end break         # End a break.")
-    # print("a             # Away from computer")
-    # print("b             # Away from computer")
 
-    # print("res          # Record Emotional State")
-    print("------------------------------------------")
-    return
-
-def showDailyStatus(session):
-    print("Daily Status - IMPLEMENT")
-    return
-
-
-
-
-def takeBreak(session):
+def takeBreakUserAction(secretary):
     if ActivePomodoro.pomodoroIsActive():
         print("There is an active pomodoro for {} more minutes")
         return
@@ -147,10 +112,12 @@ def takeBreak(session):
             bs.startBreak(5)
             print("Starting 5 minute break.")
             args = ("Break ended", "", "Break is done.  Time to get back to work")
-            lifedashboard.tasks.say.apply_async(args=args, countdown = 5 * 60)
+            tasks.say.apply_async(args=args, countdown = 5 * 60)
+
+    secretary.work_status.user_work_status = WorkStatus.BREAK
     return
 
-def endBreak(session):
+def endBreakUserAction(secretary):
     bs = BreakStatus()
     if not bs.on_break:
         print("Not on break.")
@@ -158,4 +125,6 @@ def endBreak(session):
     else:
         print("Ending Break")
         bs.endBreak()
+
+        secretary.work_status.user_work_status = WorkStatus.WAITING_FOR_POMODORO_ACTION
         return

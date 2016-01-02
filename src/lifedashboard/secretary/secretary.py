@@ -53,6 +53,10 @@ def placeholderUserAction(secretary):
     return
 
 class Secretary:
+    active_project = ActiveProject()
+    active_pomodoro = ActivePomodoro()
+    break_status = BreakStatus()
+
     class Global:
         def __init__(self):
             self.quit = False
@@ -169,8 +173,8 @@ class Secretary:
         return
 
     def pomodoroSecretaryAction(self):
-        activity_name = ActiveProject.getCurrentActivityName()
-        pom_remainder = 25 - ActivePomodoro.getRuntime()
+        activity_name = self.active_project.getCurrentActivityName()
+        pom_remainder = 25 - self.active_pomodoro.getRuntime()
         print("You are currently working on a pomodoro for {} that ends in {} minutes".format(activity_name, pom_remainder))
         return
 
@@ -185,8 +189,8 @@ class Secretary:
     ###
 
     def _initializeWorkStatus(self):
-        project_is_active = ActiveProject.projectIsActive()
-        pomodoro_is_active = ActivePomodoro.pomodoroIsActive()
+        project_is_active = self.active_project.projectIsActive()
+        pomodoro_is_active = self.active_pomodoro.pomodoroIsActive()
         break_is_active = BreakStatus().on_break
 
         if pomodoro_is_active:

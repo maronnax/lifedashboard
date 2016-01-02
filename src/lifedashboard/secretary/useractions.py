@@ -1,8 +1,4 @@
-from lifedashboard.secretary.variable.active import ActiveProject
-from lifedashboard.secretary.variable.active import ActivePomodoro
-from lifedashboard.secretary.variable.breakstatus import BreakStatus
 import lifedashboard.tasks as tasks
-
 from lifedashboard.status import WorkStatus
 import datetime
 import lifedashboard.model as model
@@ -24,13 +20,13 @@ def setActiveProjectUserAction(secretary):
     ndx = int(input("Choice? ")) - 1
     activity = group_activities[ndx]
 
-    ActiveProject.startActiveProject(activity)
+    secretary.active_project.startActiveProject(activity)
     secretary.work_status.user_work_status = WorkStatus.WAITING_FOR_POMODORO_ACTION
     return
 
 def endActiveProjectUserAction(secretary):
     print("Ending project")
-    ActiveProject.endActiveProject()
+    secretary.active_project.endActiveProject()
 
     secretary.work_status.user_work_status = WorkStatus.WAITING_FOR_WORK_ACTION
     return
@@ -46,11 +42,10 @@ def startActivePomodoroUserAction(secretary):
         ret = input("type the key >> ").strip()
         if ret == key: break
 
-    ActivePomodoro.startActivePomodoro()
+    secretary.active_pomodoro.startActivePomodoro()
+    activity_name = secretary.active_project.getCurrentActivityName()
 
-    activity_name = ActiveProject.getCurrentActivityName()
-
-    st = ActivePomodoro.getStartTime()
+    st = secretary.active_pomodoro.getStartTime()
     et = st + datetime.timedelta(seconds = 60 * 25)
 
     sts = st.strftime("%H%M")
@@ -72,19 +67,19 @@ def startActivePomodoroUserAction(secretary):
     return
 
 def endActivePomodoroUserAction(secretary):
-    ActivePomodoro.endActivePomodoro()
+    secretary.active_pomodoro.endActivePomodoro()
     secretary.work_status.user_work_status = WorkStatus.WAITING_FOR_BREAK
     return
 
 def showStatusUserAction(secretary):
-    if ActiveProject.projectIsActive():
-        print("You are working on {}".format(ActiveProject.getCurrentActivityName()))
+    if secretary.active_project.projectIsActive():
+        print("You are working on {}".format(secretary.active_project.getCurrentActivityName()))
     else:
         print("You are not currently working on any active projects.")
         return
 
-    if ActivePomodoro.pomodoroIsActive():
-        minutes_left = 25 - ActivePomodoro.getRuntime()
+    if secretary.active_pomodoro.pomodoroIsActive():
+        minutes_left = 25 - secretary.active_pomodoro.getRuntime()
         end_time = datetime.datetime.utcnow() + datetime.timedelta(seconds = minutes_left * 60)
         end_time_str = end_time.strftime("%H%M")
         print("There is an active pomodoro that will end in {} minutes at {}.".format(minutes_left, end_time_str))
@@ -94,12 +89,11 @@ def showStatusUserAction(secretary):
 
 
 def takeBreakUserAction(secretary):
-    if ActivePomodoro.pomodoroIsActive():
+    if secretary.active_pomodoro.pomodoroIsActive():
         print("There is an active pomodoro for {} more minutes")
         return
     else:
-        bs = BreakStatus()
-        if bs.on_break:
+        if secretary.break_status.on_break:
             print("Already on break for {} more minutes.")
             return
         else:
@@ -109,7 +103,7 @@ def takeBreakUserAction(secretary):
                                "play a quick game of geometry wars", "read a poem",
                                "check facebook", "do some dishes"]
 
-            bs.startBreak(5)
+            secretary.break_status.startBreak(5)
             print("Starting 5 minute break.")
             args = ("Break ended", "", "Break is done.  Time to get back to work")
             tasks.say.apply_async(args=args, countdown = 5 * 60)
@@ -118,13 +112,12 @@ def takeBreakUserAction(secretary):
     return
 
 def endBreakUserAction(secretary):
-    bs = BreakStatus()
-    if not bs.on_break:
+    if not secretary.break_status.on_break:
         print("Not on break.")
         return
     else:
         print("Ending Break")
-        bs.endBreak()
+        secretary.break_status.endBreak()
 
         secretary.work_status.user_work_status = WorkStatus.WAITING_FOR_POMODORO_ACTION
         return

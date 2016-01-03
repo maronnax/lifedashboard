@@ -4,19 +4,22 @@ from lifedashboard.redisvariable import RedisList
 import lifedashboard.model as model
 import lifedashboard.time as time
 import datetime
+import uuid
 
 class ActivePomodoro:
     pomodoro_active = RedisVariable("pomodoro_active", int)
     pomodoro_start_time = RedisVariable("pomodoro_start_time")
     pomodoro_end_time = RedisVariable("pomodoro_end_time")
     pomodoro_message = RedisVariable("pomodoro_message")
+    pomodoro_uuid = RedisVariable("pomodoro_uuid")
 
     @classmethod
     def showState(cls):
         print("pomodoro_active: {}".format(cls.pomodoro_active.value))
         print("pomodoro_start_time: {}".format(cls.pomodoro_start_time.value))
         print("pomodoro_end_time: {}".format(cls.pomodoro_end_time.value))
-        print("pomodoro_message: {}".format(cls.pomodoro_message))
+        print("pomodoro_message: {}".format(cls.pomodoro_message.value))
+        print("pomodoro_uuid: {}".format(cls.pomodoro_uuid.value))
         return
 
     @classmethod
@@ -26,6 +29,7 @@ class ActivePomodoro:
         cls.pomodoro_end_time.clear()
         cls.pomodoro_message.clear()
         cls.pomodoro_active.clear()
+        cls.pomodoro_uuid.clear()
         return
 
     @classmethod
@@ -37,8 +41,10 @@ class ActivePomodoro:
         cls.pomodoro_start_time.clear()
         cls.pomodoro_end_time.clear()
         cls.pomodoro_message.clear()
+        cls.pomodoro_uuid.clear()
 
         cls.pomodoro_active.value = 1
+        cls.pomodoro_uuid.value = str(uuid.uuid4())
         cls.pomodoro_start_time.value = time.getUTCIsoformatTimeStr()
         return
 
@@ -55,7 +61,7 @@ class ActivePomodoro:
         et_str = cls.pomodoro_end_time.value
         msg_str = cls.pomodoro_message.value
 
-        activity_record = session.query(model.ActivityRecord).get(ActiveProject.active_activityrecord_id.value)
+        activity_record = session.query(model.ActivityRecord).get(ActiveProject.project_activityrecord_id.value)
         pom = model.Pomodoro(start_time = isodate.parse_date(st_str),
                              end_time = isodate.parse_date(et_str),
                              message = msg_str,
@@ -81,59 +87,67 @@ class ActivePomodoro:
         return bool(val)
 
 class ActiveProject:
-    active = RedisVariable("active", int)
+    project_active = RedisVariable("active", int)
 
-    active_start_time = RedisVariable("active_start_time")
-    active_end_time = RedisVariable("active_end_time")
-    active_activity_name = RedisVariable("active_activity_name")
-    active_activity_id = RedisVariable("active_activity_id")
+    project_start_time = RedisVariable("project_start_time")
+    project_end_time = RedisVariable("project_end_time")
 
-    active_pomodoro_list = RedisList("active_pomodoro_list", int)
-    active_activityrecord_id = RedisVariable("active_activityrecord_id")
+    project_activity_name = RedisVariable("project_activity_name")
+    project_activity_id = RedisVariable("project_activity_id")
+
+    project_pomodoro_list = RedisList("project_pomodoro_list", int)
+
+    project_activityrecord_id = RedisVariable("project_activityrecord_id")
+    project_uuid = RedisVariable("project_uuid")
 
     @classmethod
     def getCurrentActivityName(cls):
-        return cls.active_activity_name.value
+        return cls.project_activity_name.value
 
     @classmethod
     def showState(cls):
-        print("active: {}".format(active.value))
-        print("active_start_time: {}".format(active_start_time.value))
-        print("active_end_time: {}".format(active_end_time.value))
-        print("active_activity_name: {}".format(active_activity_id.value))
-        print("active_pomodoro_list: {}".format(active_pomodoro_list.value))
-        print("active_activityrecord_id: {}".format(active_active_project_id.value))
+        print("active: {}".format(cls.project_active.value))
+        print("project_start_time: {}".format(cls.project_start_time.value))
+        print("project_end_time: {}".format(cls.project_end_time.value))
+        print("project_activity_name: {}".format(cls.project_activity_id.value))
+        print("project_pomodoro_list: {}".format(cls.project_pomodoro_list.value))
+        print("project_activityrecord_id: {}".format(cls.project_project_project_id.value))
+        print("project_uuid: {}".format(cls.project_active_project_uuid.value))
         return
 
     @classmethod
     def clearState(cls):
-        cls.active.clear()
-        cls.active_start_time.clear()
-        cls.active_end_time.clear()
-        cls.active_pomodoro_list.clear()
-        cls.active_activityrecord_id.clear()
-        cls.active_activity_name.clear()
-        cls.active.value = 0
+        cls.project_active.clear()
+        cls.project_start_time.clear()
+        cls.project_end_time.clear()
+        cls.project_pomodoro_list.clear()
+        cls.project_activityrecord_id.clear()
+        cls.project_activity_name.clear()
+        cls.project_uuid.clear()
+        cls.project_active.value = 0
         return
 
 
     @classmethod
     def startActiveProject(cls, activity):
         assert not cls.projectIsActive(), "Project must not be currently active."
-        cls.active.clear()
-        cls.active_start_time.clear()
-        cls.active_end_time.clear()
-        cls.active_pomodoro_list.clear()
-        cls.active_activityrecord_id.clear()
-        cls.active_activity_name.clear()
+        cls.project_active.clear()
+        cls.project_start_time.clear()
+        cls.project_end_time.clear()
+        cls.project_pomodoro_list.clear()
+        cls.project_activityrecord_id.clear()
+        cls.project_activity_name.clear()
+        cls.project_uuid.clear()
 
-        cls.active.value = 1
+        cls.project_active.value = 1
 
         start_time = time.getUTCTime()
         start_time_str = start_time.isoformat()
 
-        cls.active_start_time.value = start_time_str
-        cls.active_activity_name.value = activity.name
+        cls.project_uuid.value = str(uuid.uuid4())
+
+        cls.project_start_time.value = start_time_str
+        cls.project_activity_name.value = activity.name
 
         session = model.session()
         activity_loc = session.query(model.Activity).get(activity.id)
@@ -141,12 +155,12 @@ class ActiveProject:
                                               start_time = isodate.parse_datetime(start_time_str))
         session.add(activityrecord)
         session.commit()
-        cls.active_activityrecord_id.value = activityrecord.id
+        cls.project_activityrecord_id.value = activityrecord.id
         return
 
     @classmethod
     def projectIsActive(cls):
-        return bool(cls.active.value)
+        return bool(cls.project_active.value)
 
     @classmethod
     def endActiveProject(cls):
@@ -158,12 +172,12 @@ class ActiveProject:
 
         session = model.session()
 
-        active_activityrecord_id = cls.active_activityrecord_id.value
-        act_rec = session.query(model.ActivityRecord).get(active_activityrecord_id)
+        project_activityrecord_id = cls.project_activityrecord_id.value
+        act_rec = session.query(model.ActivityRecord).get(project_activityrecord_id)
         message = input("active project end summary >> ")
 
         # Write the code for linking the pomodoros to the active project.
-        pomodoro_ids = cls.active_pomodoro_list.value
+        pomodoro_ids = cls.project_pomodoro_list.value
         act_rec.end_time = isodate.parse_datetime(end_time_str)
         act_rec.message = message
 

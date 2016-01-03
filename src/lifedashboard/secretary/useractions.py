@@ -53,7 +53,7 @@ def startActivePomodoroUserAction(secretary):
 
     args = ["Pom: {}".format(activity_name),
             "{}-{}".format(sts,ets),
-            ""]
+            "", secretary.active_project.project_uuid.value]
 
     args[2] = "Starting Pom. 25m left."
     tasks.say.delay(*args)

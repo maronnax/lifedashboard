@@ -2,13 +2,13 @@ import redis
 import smtplib
 from celery import Celery
 import os
+import lifedashboard.secretary.variable.active as active
 
 BROKER_URL = "redis://localhost:6379/0"
 BROKER_TRANSPORT_OPTIONS = {'visibility_timeout': 3600}  # 1 hour.
 CELERY_RESULT_BACKEND = "redis+socket:///tmp/redis.sock"
 
 app = Celery('secretary', broker=BROKER_URL)
-
 
 # The notifier function
 # Calling the function
@@ -27,17 +27,30 @@ def notify(title, subtitle, message, sound = False, temporary = False):
     os.system('terminal-notifier {}'.format(' '.join([msg, title, sub, sound, o, sender])))
     return
 
+def checkIDIsActive(uuid):
+    return (uuid == active.ActiveProject.active_activityrecord_uuid.value or active.ActivePomodoro.pomodoro_uuid.value == uuid)
+
 @app.task
 def whisper(title, subtitle, message, parent_uuid = False):
-    notify(title, subtitle, message, False, True)
+    if parent_uuid and checkIDIsActive(parent_uuid):
+        notify(title, subtitle, message, False, True)
+    else:
+        notify("Message cancelled")
+    return
 
 @app.task
 def say(title, subtitle, message, parent_uuid = False):
-    notify(title, subtitle, message, True, True)
+    if parent_uuid and checkIDIsActive(parent_uuid):
+        notify(title, subtitle, message, True, True)
+    else:
+        notify("Message cancelled")
 
 @app.task
 def interrupt(title, subtitle, message, parent_uuid = False):
-    notify(title, subtitle, message, True, False)
+    if parent_uuid and checkIDIsActive(parent_uuid):
+        notify(title, subtitle, message, True, False)
+    else:
+        notify("Message cancelled")
 
 @app.task
 def printMsg():

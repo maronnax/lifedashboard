@@ -1,6 +1,7 @@
 import time
 import threading
 import random
+import pytz
 import pickle
 import datetime
 import pytz
@@ -12,24 +13,29 @@ from IPython import embed
 import speech_recognition
 import nltk
 import lifedashboard.model as model
-import lifedashboard.tasks
 import yaml
 import redis
 import isodate
 import pdb
 
+import lifedashboard.schedule
+import lifedashboard.time
 from lifedashboard.secretary.dbload import loadDatabaseData
 from lifedashboard.secretary.dbload import getFocusDirectories
 from lifedashboard.secretary.dbload import parseFocusDirectory
 from lifedashboard.secretary.dbload import initializeFocusGroupFromFile
 from lifedashboard.secretary.dbload import initializeActivityFromFile
 from lifedashboard.secretary.dbload import loadEmotionalStatesFromFile
+from lifedashboard.secretary.variable.dayactive import DayActive
+from lifedashboard.secretary.variable.dayactive import DayLastReset
 
 from lifedashboard.secretary.variable.active import ActiveProject
 from lifedashboard.secretary.variable.active import ActivePomodoro
 from lifedashboard.secretary.variable.breakstatus import BreakStatus
 
-import lifedashboard.secretary.useractions as useractions
+from lifedashboard.redisvariable import RedisVariable
+from lifedashboard.redisvariable import RedisCallback
+
 # from lifedashboard.secretary.useractions import setActiveProject
 # from lifedashboard.secretary.useractions import endActiveProject
 # from lifedashboard.secretary.useractions import startActivePomodoro
@@ -45,8 +51,10 @@ from lifedashboard.secretary.variable.active import ActivePomodoro
 from lifedashboard.secretary.variable.breakstatus import BreakStatus
 from lifedashboard.status import WorkStatus
 import lifedashboard.model as model
-import lifedashboard.tasks
+# import lifedashboard.tasks
 import datetime
+import lifedashboard.secretary.useractions as useractions
+
 
 def placeholderUserAction(secretary):
     print("Implement this action")
@@ -56,6 +64,9 @@ class Secretary:
     active_project = ActiveProject()
     active_pomodoro = ActivePomodoro()
     break_status = BreakStatus()
+
+    day_active = DayActive()
+    day_last_reset = DayLastReset()
 
     class Global:
         def __init__(self):
@@ -94,6 +105,8 @@ class Secretary:
     def __init__(self, config):
 
         self.config = config
+        self.database_directory = config.get("data_directory", is_filename = True)
+
         self.title_name = config.get("title_name")
         self.first_name = config.get("first_name")
         self.last_name = config.get("last_name")
@@ -101,37 +114,71 @@ class Secretary:
         self.secretary_rate = config.get("secretary_rate", default=0, type=int)
         self.timezone = pytz.timezone(config.get("timezone"))
 
+        self.redis_callback_mgr = RedisCallback(poll_interval = 10)
+        self.redis_callback_mgr.execute()
+
         loadDatabaseData(config)
 
         self.work_status = WorkStatus()
-        self._initializeWorkStatus()
 
+        self.work_status.addStartHook(WorkStatus.WAITING_FOR_SCHEDULE_ACTION, lambda : self.waitingForScheduleAction())
         self.work_status.addStartHook(WorkStatus.WAITING_FOR_WORK_ACTION, lambda : self.waitingForWorkSecretaryAction())
         self.work_status.addStartHook(WorkStatus.WAITING_FOR_POMODORO_ACTION, lambda : self.waitingForPomodoroSecretaryAction())
         self.work_status.addStartHook(WorkStatus.POMODORO, lambda: self.pomodoroSecretaryAction())
         self.work_status.addStartHook(WorkStatus.WAITING_FOR_BREAK, lambda: self.waitingForBreakSecretaryAction())
         self.work_status.addHook(WorkStatus.BREAK, lambda: self.breakSecretaryAction())
 
+        self.template_schedule_dir = config.get("schedules_directory", "conf", is_filename = True)
+        self.current_schedule_file = None
+        self.current_schedule = None
+
+        fn = self.getDailyScheduleFileName()
+        if os.path.isfile(fn):
+            self.current_schedule_file = fn
+            self.current_schedule = lifedashboard.schedule.Schedule()
+            self.current_schedule.parseFile(self.current_schedule_file)
+
+        last_reset = self.day_last_reset.value
+        if last_reset == "":
+            self.day_active.value = 0
+        else:
+            current_time = lifedashboard.time.convertUTCDTToLocal(lifedashboard.time.getUTCTime())
+            last_reset = lifedashboard.time.convertUTCDTToLocal(isodate.parse_datetime(self.last_reset))
+            if current_time.day != last_reset.day:
+                self.day_active.value = 0
+
+        # self._initializeWorkStatus()
+
         self.actions = []
 
-
         # self.addUserAction(('ss',), : placeholderUserAction(self),                                  "Show daily status")
-        # self.addUserAction(('cds',),            lambda : self.placeholderUserAction(),              "Create your daily schedule")
+        self.addUserAction(('cds',),              lambda : useractions.createDailySchedule(self),           "Create your daily schedule", state_white_list = (WorkStatus.WAITING_FOR_SCHEDULE_ACTION, ))
+        self.addUserAction(('sds',),              lambda : useractions.showDailySchedule(self),             "Show your daily schedule")
         self.addUserAction(('start ap',),         lambda : useractions.setActiveProjectUserAction(self),    "start active project", state_white_list = (WorkStatus.WAITING_FOR_WORK_ACTION, ))
         self.addUserAction(('end ap',),           lambda : useractions.endActiveProjectUserAction(self),    "end active project", state_black_list = (WorkStatus.POMODORO, WorkStatus.BREAK, WorkStatus.WAITING_FOR_WORK_ACTION, ))
         self.addUserAction(('start pom',),        lambda : useractions.startActivePomodoroUserAction(self), "start pomodoro", state_white_list = (WorkStatus.WAITING_FOR_POMODORO_ACTION, ))
         self.addUserAction(('end pom',),          lambda : useractions.endActivePomodoroUserAction(self),    "end pomodoro", state_white_list = (WorkStatus.POMODORO, ))
-        self.addUserAction(('break',),            lambda : useractions.takeBreakUserAction(self),           "take a break", state_white_list=(WorkStatus.WAITING_FOR_BREAK, ))
+        self.addUserAction(('break',),            lambda : useractions.takeBreakUserAction(self),           "take a break", state_white_list=(WorkStatus.WAITING_FOR_BREAK, WorkStatus.WAITING_FOR_POMODORO_ACTION))
         self.addUserAction(('end break',),        lambda : useractions.endBreakUserAction(self),            "end break", state_white_list=(WorkStatus.BREAK, ))
         # self.addUserAction(('ac',),             lambda : placeholderUserAction(),                   "set away from computer")
         # self.addUserAction(('bc',),             lambda : placeholderUserAction(),                   "set back to computer")
-        # self.addUserAction(('res',),            lambda : placeholderUserAction(),                   "record emotional state")
+        self.addUserAction(('res',),              lambda : useractions.recordEmotionalState(self),          "Record emotional state")
         self.addUserAction(('s', ),               lambda : useractions.showStatusUserAction(self),          "Show current status")
-        self.addUserAction(('l',), lambda : self.showHelpUserAction(), "Show help")
-        self.addUserAction(('q',), lambda : self.quitSessionUserAction(), "Quit the secretary")
+        self.addUserAction(('l',),                lambda : self.showHelpUserAction(), "Show help")
+        self.addUserAction(('q',),                lambda : self.quitSessionUserAction(), "Quit the secretary")
 
         self.global_struct = self.Global()
+
+        self.day_active.registerCallback(self.redis_callback_mgr, notifyOnDayStart)
         return
+
+    def getActivityRecordFilename(self):
+        return os.path.join(self.database_directory, "activityrecords", "events.txt")
+
+    def getDailyScheduleFileName(self):
+        tm = lifedashboard.time.convertUTCDTToLocal(lifedashboard.time.getUTCTime())
+        schedule_filename = "schedule_{}.txt".format(tm.strftime("%b_%d_%Y"))
+        return os.path.join(self.database_directory, "activityrecords", schedule_filename)
 
     def addUserAction(self, cmds, function, help_message, state_white_list = None, state_black_list = None):
         action = self.SecretaryAction(cmds, function, help_message, state_white_list, state_black_list)
@@ -164,6 +211,11 @@ class Secretary:
         return
 
     ## DEFAULT ACTIONS
+
+    def waitingForScheduleAction(self):
+        print("You are just starting your day.  Please create your schedule")
+        return
+
     def waitingForWorkSecretaryAction(self):
         print("There is no active project; you should start one.")
         return
@@ -191,23 +243,35 @@ class Secretary:
     def _initializeWorkStatus(self):
         project_is_active = self.active_project.projectIsActive()
         pomodoro_is_active = self.active_pomodoro.pomodoroIsActive()
-        break_is_active = BreakStatus().on_break
+        break_is_active = self.break_status.on_break
 
-        if pomodoro_is_active:
+        if self.current_schedule is None:
+            if pomodoro_is_active:
+                self.active_pomodoro.endActivePomodoro(self, silent = True)
+            if break_is_active:
+                self.break_status.endBreak()
+            if project_is_active:
+                self.active_project.endActiveProject(self, silent = True)
+            self.work_status.user_work_status = WorkStatus.WAITING_FOR_SCHEDULE_ACTION
+
+        elif pomodoro_is_active:
             self.work_status.user_work_status = WorkStatus.POMODORO
         elif break_is_active:
             self.work_status.user_work_status = WorkStatus.BREAK
         elif project_is_active:
+            # Could also be WorkStatus.WAITING_FOR_BREAK
             self.work_status.user_work_status = WorkStatus.WAITING_FOR_POMODORO_ACTION
         else:
             self.work_status.user_work_status = WorkStatus.WAITING_FOR_WORK_ACTION
+
         return
 
 
     def run(self):
         # This initializes anything that should happen in the current
         # state.
-        self.work_status.updateWorkStatus(self.work_status.user_work_status)
+        self._initializeWorkStatus()
+        # self.work_status.updateWorkStatus(self.work_status.user_work_status)
 
         try:
             thread = threading.Thread(target = self.secretarySpeak, args = (self.global_struct, ))
@@ -218,6 +282,8 @@ class Secretary:
             print("Got keyboard interrupt.")
             self.global_struct.quit = True
         thread.join()
+        self.redis_callback_mgr.quit()
+
         return
 
     def secretaryInput(self, global_struct):
@@ -257,6 +323,7 @@ class Secretary:
 
     def secretarySpeak(self, global_struct):
         last_branch = -1
+
         while not global_struct.quit:
             time.sleep(1)
             # If there is an inactive project, alert
@@ -286,6 +353,15 @@ class Secretary:
             #             last_branch = branch_id
         return
 
-
+    def registerDailyScheduleFile(self, schedule_fn):
+        # load the file and create alerts
+        self.current_schedule_file = schedule_fn
+        self.current_schedule = lifedashboard.schedule.Schedule()
+        self.current_schedule.parseFile(self.current_schedule_file)
+        return
 
 ###
+
+def notifyOnDayStart():
+    print("Your day has started.  Get to the computer.")
+    return

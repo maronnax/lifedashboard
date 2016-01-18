@@ -2,14 +2,75 @@ import redis
 import isodate
 import datetime
 import lifedashboard.model as model # BLECK!
+from threading import Thread
+import time
 import pdb
 
+class RedisCallback:
+    def __init__(self, poll_interval):
+        self.variable_getvalue = {}
+        self.variable_curvalue = {}
+        self.variable_callbacks = {}
+        self.variable_repeat_callback = {}
+        self.variable_arguments = {}
+
+        self.run_poll = True
+        self.thread = None
+        self.poll_interval = poll_interval
+
+        return
+
+    def quit(self):
+        self.run_poll = False
+        if self.thread is not None:
+            self.thread.join()
+        return
+
+    def execute(self):
+        self.thread = Thread(target = self.pollCallbacks)
+        self.thread.start()
+        return
+
+    def addCallback(self, variable, callback, fire_times = -1, args = ()):
+        variable_name = variable.varname
+        getValue = lambda : variable.value
+
+        self.variable_getvalue[variable_name] = getValue
+        self.variable_curvalue[variable_name] = getValue()
+        self.variable_callbacks[variable_name] = callback
+        self.variable_repeat_callback[variable_name] = fire_times
+        self.variable_arguments[variable_name] = args
+        return
+
+    def pollCallbacks(self):
+        while self.run_poll:
+            items = list(self.variable_curvalue.items()) # B/c things can remove themselves during run
+            for (var_name, var_cur_value) in items:
+                new_value = self.variable_getvalue[var_name]()
+
+                if var_cur_value != new_value:
+                    # print("Firing {}".format(var_name))
+                    self.variable_curvalue[var_name] = new_value
+                    self.variable_callbacks[var_name](*self.variable_arguments[var_name])
+                    self.variable_repeat_callback[var_name] -= 1
+                    if not self.variable_repeat_callback[var_name]:
+                        self.variable_curvalue.pop(var_name)
+                        self.variable_callbacks.pop(var_name)
+                        self.variable_repeat_callback.pop(var_name)
+                        self.variable_getvalue.pop(var_name)
+                        self.variable_arguments.pop(var_name)
+            time.sleep(self.poll_interval)
+        return
 
 class RedisVariable:
     def __init__(self, name, type = str):
         self.varname = name
         self.type = type if type is not None else False
         self.r = redis.StrictRedis(host='localhost', port=6379, db=0)
+        return
+
+    def registerCallback(self, callback_manager, cb, fire_times = -1, args = ()):
+        callback_manager.addCallback(self, cb, fire_times, args)
         return
 
     def getValue(self):
@@ -40,6 +101,11 @@ class RedisList:
         self.varname = name
         self.type = type if type is not None else False
         self.r = redis.StrictRedis(host='localhost', port=6379, db=0)
+        self.callbacks = []
+        return
+
+    def registerCallback(self, callback_mgr, cb):
+        callback_mgr.addCallback(self, cb)
         return
 
     def rpush(self, value):
@@ -52,7 +118,6 @@ class RedisList:
             ret_val = str(ret_val, 'utf-8')
         else:
             ret_val = self.type()
-
         return self.type(ret_val)
 
 
@@ -66,7 +131,6 @@ class RedisList:
             ret_val = str(ret_val, 'utf-8')
         else:
             ret_val = self.type()
-
         return self.type(ret_val)
 
     def mapByteStringToValue(self, value):

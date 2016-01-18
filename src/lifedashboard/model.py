@@ -21,6 +21,7 @@ from sqlalchemy import ForeignKey
 from sqlalchemy.orm import relationship
 from sqlalchemy.orm import backref
 from sqlalchemy.schema import UniqueConstraint
+import lifedashboard.time as time
 import datetime
 import os
 import pdb
@@ -47,9 +48,38 @@ Base = declarative_base(cls=Base)
 class FocusGroup(Base, CreatedAtMixin):
     name = Column(String, unique = True, nullable = False)
     activities = relationship("Activity", backref="focus_group")
+    disk_name = Column(String, unique = True, nullable = False)
 
     def __repr__(self):
         return "{}".format(self.name)
+
+    def getFocusGroupDirectoryFromBaseDir(self):
+        return self.disk_name
+
+class Break(Base, CreatedAtMixin):
+    start_time = Column(DateTime, nullable = False)
+    end_time = Column(DateTime, nullable = False)
+    break_activity_id = Column(Integer, ForeignKey("breakactivity.id"), nullable = False)
+    activity_record_id = Column(Integer, ForeignKey("activityrecord.id"), nullable=False)
+
+    def __repr__(self):
+        start_time = time.formatTimeLong(time.convertUTCDTToLocal(self.start_time))
+        end_time = time.formatTimeShort(time.convertUTCDTToLocal(self.end_time))
+
+        return "Break {}-{}: {}".format(start_time, end_time, self.break_activity.name)
+
+
+BreakLength = Enum("short", "long", name = 'break_length')
+
+class BreakActivity(Base, CreatedAtMixin):
+    name = Column(String, nullable = False, unique = True)
+    description = Column(String)
+    type = Column(BreakLength)
+    breaks = relationship("Break", backref="break_activity")
+
+    def __repr__(self):
+        len_str = " (15m)" if self.type == "long" else " (5m)"
+        return "{}{}".format(self.name, len_str)
 
 class Pomodoro(Base, CreatedAtMixin):
     start_time = Column(DateTime, nullable = False)
@@ -57,7 +87,11 @@ class Pomodoro(Base, CreatedAtMixin):
     message = Column(String)
     activity_record_id = Column(Integer, ForeignKey("activityrecord.id"), nullable=False)
     def __repr__(self):
-        return "Pom {}, {}: {} - {}".format(self.id, self.activity_record.activity.name, self.start_time.strftime("%b-%d %H%M"), self.end_time.strftime("%H%M"))
+
+        start_time_str = time.formatTimeLong(time.convertUTCDTToLocal(self.start_time))
+        end_time_str  = time.formatTimeShort(time.convertUTCDTToLocal(self.end_time))
+
+        return "Pom {}, {}: {} - {}".format(self.id, self.activity_record.activity.name, start_time_str, end_time_str)
 
 class ActivityRecord(Base, CreatedAtMixin):
     start_time = Column(DateTime, nullable = False)
@@ -66,14 +100,17 @@ class ActivityRecord(Base, CreatedAtMixin):
     activity_id = Column(Integer, ForeignKey("activity.id"), nullable=True)
 
     pomodoros = relationship("Pomodoro", backref='activity_record')
-    def __repr__(self):
-        if self.end_time is None:
-            return "{}: {} - *".format(self.activity.name, self.start_time.strftime("%b-%d %H%M"), self.start_time.strftime("%H%M"))
-        elif (self.start_time - self.end_time).total_seconds() < (15 * 60):
-            return "{}: {} ".format(self.activity.name, self.start_time.strftime("%b-%d %H%M"))
-        else:
-            return "{}: {} - {}".format(self.activity.name, self.start_time.strftime("%b-%d %H%M"), self.end_time.strftime("%H%M"))
+    breaks = relationship("Break", backref="activity_record")
 
+    def __repr__(self):
+        start_time_str = time.formatTimeLong(time.convertUTCDTToLocal(self.start_time))
+        if self.end_time is None:
+            return "{}: {}-*".format(self.activity.name, start_time_str)
+        elif (self.end_time - self.start_time).total_seconds() < (15 * 60):
+            return "{}: {} ".format(self.activity.name, start_time_str)
+        else:
+            end_time_str = time.formatTimeShort(time.convertUTCDTToLocal(self.end_time))
+            return "{}: {}-{}".format(self.activity.name, start_time_str, end_time_str)
 
 def parseProgress(progress):
     components = progress.split()
@@ -101,23 +138,26 @@ class EmotionalState(Base, CreatedAtMixin):
     emotions = relationship("Emotion", secondary="emotion_states", back_populates="emotional_states")
 
     def __repr__(self):
+
+        time_str = time.formatTimeLong(time.convertUTCDTToLocal(self.time))
+
         emotion_string = ", ".join(map(lambda emot: emot.name, self.emotions))
-        repr_string = "{} - {}".format(self.simpleStrftime(self.time), emotion_string)
+        repr_string = "{} - {}".format(time_str, emotion_string)
 
         if self.description:
             repr_string += " - {}".format(self.description)
 
         return repr_string
 
-    @classmethod
-    def createEmotionalState(cls, session):
-        now = datetime.datetime.utcnow()
+    # @classmethod
+    # def createEmotionalState(cls, session):
+    #     now = datetime.datetime.utcnow()
 
-        emotions = cls.selectEmotions(session)
-        desription = cls.getOptionalDescription()
+    #     emotions = cls.selectEmotions(session)
+    #     desription = cls.getOptionalDescription()
 
-        emotional_state = cls(time = now, emotions = emotions, description = desription)
-        return emotional_state
+    #     emotional_state = cls(time = now, emotions = emotions, description = desription)
+    #     return emotional_state
 
     @staticmethod
     def selectEmotions(session):
@@ -155,9 +195,17 @@ class Activity(Base, CreatedAtMixin):
     active = Column(Boolean, default = True)
     focusgroup_id = Column(Integer, ForeignKey("focusgroup.id"), nullable=True)
     records = relationship("ActivityRecord", backref="activity")
+    disk_name = Column(String, unique = True, nullable = False)
 
     def __repr__(self):
         return "{} ({} hrs)".format(self.name, self.expected_time)
+
+    def getActivityDirectoryFromBaseDir(self):
+        return os.path.join(self.focus_group.getFocusGroupDirectoryFromBaseDir(), "activities")
+
+    def getActivityEventRecordFilenameFromBaseDir(self):
+        event_fn = "{0}_record.txt".format(self.disk_name)
+        return os.path.join(self.getActivityDirectoryFromBaseDir(), event_fn)
 
     expected_time = property(lambda self: self.expected_pomodoro/2)
 

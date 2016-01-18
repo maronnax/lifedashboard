@@ -2,24 +2,22 @@ from lifedashboard.redisvariable import RedisVariable
 import collections
 
 class WorkStatus:
-    WAITING_FOR_WORK_ACTION = 0
-    WAITING_FOR_POMODORO_ACTION = 1
-    POMODORO = 2
-    WAITING_FOR_BREAK = 3
-    BREAK = 4
+    WAITING_FOR_SCHEDULE_ACTION = 0
+    WAITING_FOR_WORK_ACTION = 1
+    WAITING_FOR_POMODORO_ACTION = 2
+    POMODORO = 3
+    WAITING_FOR_BREAK = 4
+    BREAK = 5
 
     begin_hooks = collections.defaultdict(lambda : [])
     hooks = collections.defaultdict(lambda : [])
     end_hooks = collections.defaultdict(lambda :[])
 
     def execHooks(self, state):
-
         for h in self.begin_hooks[state]:
             h()
-
         for h in self.hooks[state]:
             h()
-
         for h in self.end_hooks[state]:
             h()
 

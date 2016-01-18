@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 
 import lifedashboard.secretary.variable.active as active
+import lifedashboard.secretary.variable.breakstatus as breakstatus
 active.ActivePomodoro.clearState()
 active.ActiveProject.clearState()
+breakstatus.BreakStatus().clearState()

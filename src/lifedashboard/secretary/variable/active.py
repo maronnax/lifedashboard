@@ -33,7 +33,7 @@ class ActivePomodoro:
         return
 
     @classmethod
-    def startActivePomodoro(cls):
+    def startActivePomodoro(cls, secretary):
         assert ActiveProject.projectIsActive(), "Project must be active to start a pomodoro."
         assert not cls.pomodoroIsActive(), "Pomodoro must not be currently active."
 
@@ -49,9 +49,12 @@ class ActivePomodoro:
         return
 
     @classmethod
-    def endActivePomodoro(cls):
+    def endActivePomodoro(cls, secretary, silent = False):
         assert cls.pomodoroIsActive(), "Pomodoro must be active."
-        msg = input("Pom message >> ")
+        if not silent:
+            msg = input("Pom message >> ")
+        else:
+            msg = ""
         cls.pomodoro_active.value = 0
         cls.pomodoro_end_time.value =  time.getUTCIsoformatTimeStr()
         cls.pomodoro_message.value = msg
@@ -62,13 +65,23 @@ class ActivePomodoro:
         msg_str = cls.pomodoro_message.value
 
         activity_record = session.query(model.ActivityRecord).get(ActiveProject.project_activityrecord_id.value)
-        pom = model.Pomodoro(start_time = isodate.parse_date(st_str),
-                             end_time = isodate.parse_date(et_str),
+        pom = model.Pomodoro(start_time = isodate.parse_datetime(st_str),
+                             end_time = isodate.parse_datetime(et_str),
                              message = msg_str,
                              activity_record = activity_record)
         session.add(pom)
         session.commit()
 
+        start_time_str = time.formatTimeShort(time.convertUTCDTToLocal(pom.start_time))
+        end_time_str = time.formatTimeShort(time.convertUTCDTToLocal(pom.end_time))
+        extra_str = " - {0}".format(msg) if msg_str.strip() else ""
+        line = "  Pomodoro: {0}-{1}{2}\n".format(start_time_str, end_time_str, extra_str)
+
+        for fn in [activity_record.activity.getActivityEventRecordFilenameFromBaseDir(), secretary.getActivityRecordFilename()]:
+            with open(fn, 'a') as out_file:
+                out_file.write(line)
+                out_file.flush()
+        cls.clearState()
         return
 
     @classmethod
@@ -127,9 +140,8 @@ class ActiveProject:
         cls.project_active.value = 0
         return
 
-
     @classmethod
-    def startActiveProject(cls, activity):
+    def startActiveProject(cls, activity, secretary):
         assert not cls.projectIsActive(), "Project must not be currently active."
         cls.project_active.clear()
         cls.project_start_time.clear()
@@ -156,6 +168,21 @@ class ActiveProject:
         session.add(activityrecord)
         session.commit()
         cls.project_activityrecord_id.value = activityrecord.id
+
+        ##########
+
+        # activity_record = secretary.session.query(model.ActiveProject).get(secretary.active_project.project_activityrecord_id)
+        all_events_fn = secretary.getActivityRecordFilename()
+
+        utc_start_time = start_time
+        local_start_time = time.convertUTCDTToLocal(utc_start_time)
+        local_start_time_str = time.formatTimeLong(local_start_time)
+        line = "Activity {0} - Started {1}\n".format(activity.name, local_start_time_str)
+
+        for fn in [activity.getActivityEventRecordFilenameFromBaseDir(), secretary.getActivityRecordFilename()]:
+            with open(fn, 'a') as out_file:
+                out_file.write(line)
+                out_file.flush()
         return
 
     @classmethod
@@ -163,7 +190,7 @@ class ActiveProject:
         return bool(cls.project_active.value)
 
     @classmethod
-    def endActiveProject(cls):
+    def endActiveProject(cls, secretary, silent = False):
         assert cls.projectIsActive(), "Project must be active."
         assert not ActivePomodoro.pomodoroIsActive(), "Must close all Pomodoros first."
 
@@ -174,7 +201,10 @@ class ActiveProject:
 
         project_activityrecord_id = cls.project_activityrecord_id.value
         act_rec = session.query(model.ActivityRecord).get(project_activityrecord_id)
-        message = input("active project end summary >> ")
+        if not silent:
+            message = input("active project end summary >> ")
+        else:
+            message = ""
 
         # Write the code for linking the pomodoros to the active project.
         pomodoro_ids = cls.project_pomodoro_list.value
@@ -183,6 +213,16 @@ class ActiveProject:
 
         session.add(act_rec)
         session.commit()
+
+        utc_end_time = end_time
+        local_end_time = time.convertUTCDTToLocal(utc_end_time)
+        local_end_time_str = time.formatTimeLong(local_end_time)
+        line = "Activity {0} - Ended {1}\n".format(act_rec.activity.name, local_end_time_str)
+
+        for fn in [act_rec.activity.getActivityEventRecordFilenameFromBaseDir(), secretary.getActivityRecordFilename()]:
+            with open(fn, 'a') as out_file:
+                out_file.write(line)
+                out_file.flush()
 
         cls.clearState()
         return

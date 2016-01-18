@@ -12,7 +12,6 @@ def convertUTCDTToLocal(dt, tz = 'America/Los_Angeles'):
     loc_tzinfo = pytz.timezone(tz)
     return dt.replace(tzinfo=pytz.utc).astimezone(loc_tzinfo)
 
-
 def formatTimeShort(dt):
     # Jan 1 2016 2:30PM -> "1430"
     return dt.strftime("%H%M")

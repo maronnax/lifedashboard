@@ -1,0 +1,5 @@
+#! /bin/sh
+
+rm -f /Users/naddy/Source/lifedashboard/db/secretary.db
+rm -f /Users/naddy/Source/lifedashboard/conf/userdata/activityrecords/events.txt
+/Users/naddy/Source/lifedashboard/bin/clear_state
